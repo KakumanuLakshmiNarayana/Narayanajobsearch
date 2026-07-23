@@ -32,10 +32,22 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
       .order("created_at", { ascending: false });
     setApplications(apps ?? []);
 
-    const { data: sec } = await supabase
-      .from("resume_sections")
-      .select("*")
-      .order("sort_order");
+    const { data: latestResume } = await supabase
+      .from("resumes")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("is_base", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { data: sec } = latestResume
+      ? await supabase
+          .from("resume_sections")
+          .select("*")
+          .eq("resume_id", latestResume.id)
+          .order("sort_order")
+      : { data: [] };
     setSections(sec ?? []);
 
     const { data: f } = await supabase.from("job_filters").select("*").eq("user_id", user.id).maybeSingle();

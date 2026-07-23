@@ -13,9 +13,20 @@ export async function POST(req: NextRequest) {
   if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
 
   const admin = createAdminClient();
+
+  const { data: latestResume } = await admin
+    .from("resumes")
+    .select("id")
+    .eq("user_id", user_id)
+    .eq("is_base", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!latestResume) return NextResponse.json({ error: "no base resume on file" }, { status: 400 });
+
   const { data: sections } = await admin
     .from("resume_sections").select("header, subject")
-    .eq("user_id", user_id);
+    .eq("resume_id", latestResume.id);
   if (!sections?.length) return NextResponse.json({ error: "no base resume on file" }, { status: 400 });
   const resumeText = sections.map(s => `${s.header}:\n${s.subject}`).join("\n\n");
 
