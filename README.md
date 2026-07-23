@@ -21,7 +21,12 @@ publisher feed, if you want a lower-risk sourcing path).
 - Next.js 14 (App Router) + Tailwind
 - Supabase (Postgres + Auth + Storage), multi-tenant via Row Level Security
 - Anthropic Claude for resume parsing, title suggestions, match scoring, tailoring
-- Apify for job board scraping (LinkedIn/Indeed/Glassdoor actors — swap actor IDs in `src/app/api/jobs/ingest/route.ts`)
+- Job discovery: synced from the existing `jobboard` Supabase project (a separately-run
+  daily pipeline pulling from Adzuna, Arbeitnow, USAJobs, Dice, LinkedIn, Indeed,
+  Glassdoor, etc. — 57k+ jobs and growing). We read its public `jobs` table
+  (`JOBBOARD_SUPABASE_URL` / `JOBBOARD_SUPABASE_ANON_KEY`) and copy matches into our
+  own `jobs` pool, rather than re-scraping ourselves. See `src/lib/jobboard.ts` and
+  `src/app/api/jobs/ingest/route.ts`.
 
 ## Data model (Supabase project: job-agent, id gkpwhyhjytjcutuyvwqf)
 - `profiles` — 1:1 with auth.users
@@ -45,7 +50,7 @@ only.
 1. `cp .env.example .env.local` and fill in:
    - `SUPABASE_SERVICE_ROLE_KEY` — Supabase dashboard > Project Settings > API
    - `ANTHROPIC_API_KEY` — console.anthropic.com
-   - `APIFY_TOKEN` — apify.com account, and subscribe to LinkedIn/Indeed/Glassdoor scraper actors in the Apify Store (update actor IDs in `SOURCE_ACTORS` in `src/app/api/jobs/ingest/route.ts` to match what you subscribe to)
+   - `JOBBOARD_SUPABASE_URL` / `JOBBOARD_SUPABASE_ANON_KEY` — already filled in with the shared `jobboard` project's public read credentials, no action needed
    - `CRON_SECRET` — any random string, used to authorize `/api/cron/daily`
 2. `npm install`
 3. `npm run dev`
