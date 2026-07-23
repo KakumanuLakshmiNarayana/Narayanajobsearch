@@ -14,6 +14,14 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
   const [sections, setSections] = useState<any[]>([]);
   const [filters, setFilters] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [filterForm, setFilterForm] = useState({
+    titles: "",
+    locations: "Remote",
+    remoteOnly: true,
+    jobType: "full_time",
+    sources: ["linkedin", "indeed"] as string[]
+  });
 
   async function loadAll() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -52,6 +60,15 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
 
     const { data: f } = await supabase.from("job_filters").select("*").eq("user_id", user.id).maybeSingle();
     setFilters(f);
+    if (f) {
+      setFilterForm({
+        titles: (f.titles ?? []).join(", "),
+        locations: (f.locations ?? []).join(", "),
+        remoteOnly: !!f.remote_only,
+        jobType: f.job_type ?? "full_time",
+        sources: f.sources ?? ["linkedin", "indeed"]
+      });
+    }
   }
 
   useEffect(() => { loadAll(); }, []);
@@ -63,11 +80,45 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
 
   async function runIngest() {
     setBusy("ingest");
+    setToast(null);
     const { data: { user } } = await supabase.auth.getUser();
-    await fetch("/api/jobs/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
-    await fetch("/api/jobs/score", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
+    const ingestRes = await fetch("/api/jobs/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
+    const ingestJson = await ingestRes.json().catch(() => ({}));
+    if (!ingestRes.ok) {
+      setToast(`Fetch failed: ${ingestJson.error ?? ingestRes.status}`);
+      setBusy(null);
+      return;
+    }
+    const scoreRes = await fetch("/api/jobs/score", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
+    const scoreJson = await scoreRes.json().catch(() => ({}));
+    if (!scoreRes.ok) {
+      setToast(`Scoring failed: ${scoreJson.error ?? scoreRes.status}`);
+    } else if ((ingestJson.new_jobs ?? 0) === 0) {
+      setToast("No new jobs found this run (sources may have returned nothing new, or Apify actors aren't configured yet).");
+    } else {
+      setToast(`Found ${ingestJson.new_jobs} new job(s), scored ${scoreJson.scored ?? 0}.`);
+    }
     await loadAll();
     setBusy(null);
+  }
+
+  async function saveFilters() {
+    setBusy("filters");
+    setToast(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("job_filters").upsert({
+      user_id: user!.id,
+      titles: filterForm.titles.split(",").map(s => s.trim()).filter(Boolean),
+      locations: filterForm.locations.split(",").map(s => s.trim()).filter(Boolean),
+      remote_only: filterForm.remoteOnly,
+      job_type: filterForm.jobType,
+      sources: filterForm.sources,
+      is_active: true
+    }, { onConflict: "user_id" });
+    setBusy(null);
+    if (error) return setToast(`Save failed: ${error.message}`);
+    setToast("Filters saved.");
+    await loadAll();
   }
 
   async function tailor(userJobId: string) {
@@ -101,6 +152,13 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
           <button onClick={logout} className="text-sm text-slate-500 underline">Log out</button>
         </div>
       </header>
+
+      {toast && (
+        <div className="mx-6 mt-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2 flex justify-between items-center">
+          <span>{toast}</span>
+          <button onClick={() => setToast(null)} className="text-amber-500 ml-4">✕</button>
+        </div>
+      )}
 
       <nav className="flex gap-2 px-6 pt-4">
         {(["pipeline", "applications", "resume", "filters"] as Tab[]).map(t => (
@@ -212,17 +270,54 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
         )}
 
         {tab === "filters" && (
-          <div className="bg-white p-6 rounded-xl shadow max-w-xl space-y-2 text-sm">
-            {filters ? (
-              <>
-                <div><span className="font-medium">Titles:</span> {filters.titles?.join(", ")}</div>
-                <div><span className="font-medium">Locations:</span> {filters.locations?.join(", ")}</div>
-                <div><span className="font-medium">Remote only:</span> {String(filters.remote_only)}</div>
-                <div><span className="font-medium">Job type:</span> {filters.job_type}</div>
-                <div><span className="font-medium">Sources:</span> {filters.sources?.join(", ")}</div>
-                <a href="/onboarding" className="underline text-slate-500 inline-block mt-2">Edit via onboarding flow</a>
-              </>
-            ) : <p className="text-slate-400">No filters set yet.</p>}
+          <div className="bg-white p-6 rounded-xl shadow max-w-xl space-y-4 text-sm">
+            {!filters && <p className="text-amber-600">No filters saved yet — "Fetch jobs now" won't work until you save these.</p>}
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Job titles (comma separated)</label>
+              <input className="w-full border rounded-lg px-3 py-2"
+                value={filterForm.titles}
+                onChange={e => setFilterForm({ ...filterForm, titles: e.target.value })}
+                placeholder="e.g. AI Engineer, Backend Engineer" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Locations (comma separated)</label>
+              <input className="w-full border rounded-lg px-3 py-2"
+                value={filterForm.locations}
+                onChange={e => setFilterForm({ ...filterForm, locations: e.target.value })} />
+            </div>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={filterForm.remoteOnly}
+                onChange={e => setFilterForm({ ...filterForm, remoteOnly: e.target.checked })} /> Remote only
+            </label>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Job type</label>
+              <select className="w-full border rounded-lg px-3 py-2"
+                value={filterForm.jobType}
+                onChange={e => setFilterForm({ ...filterForm, jobType: e.target.value })}>
+                <option value="full_time">Full-time</option>
+                <option value="contract">Contract</option>
+                <option value="part_time">Part-time</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Sources</label>
+              {["linkedin", "indeed", "glassdoor"].map(src => (
+                <label key={src} className="flex items-center gap-2 capitalize">
+                  <input type="checkbox" checked={filterForm.sources.includes(src)}
+                    onChange={e => setFilterForm({
+                      ...filterForm,
+                      sources: e.target.checked
+                        ? [...filterForm.sources, src]
+                        : filterForm.sources.filter(s => s !== src)
+                    })} />
+                  {src}
+                </label>
+              ))}
+            </div>
+            <button onClick={saveFilters} disabled={busy === "filters"}
+              className="bg-slate-900 text-white rounded-lg px-4 py-2 disabled:opacity-50">
+              {busy === "filters" ? "Saving..." : "Save filters"}
+            </button>
           </div>
         )}
       </main>
