@@ -78,28 +78,45 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
     router.push("/login");
   }
 
+  async function pollFetchQueue(userId: string) {
+    const res = await fetch("/api/jobs/fetch-now", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId })
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setToast(`Fetch failed: ${json.error ?? res.status}`);
+      setBusy(null);
+      return;
+    }
+    const status = json.request?.status;
+    if (status === "queued") {
+      setToast(`Queued — position ${json.queuePosition ?? "?"} in line. This waits for any other in-progress run to finish first.`);
+      setTimeout(() => pollFetchQueue(userId), 6000);
+    } else if (status === "running") {
+      setToast("Fetching fresh jobs from jobboard (LinkedIn/Indeed/Glassdoor/Dice) for your filters — this can take a couple of minutes...");
+      setTimeout(() => pollFetchQueue(userId), 6000);
+    } else if (status === "syncing") {
+      setToast("Run finished, syncing matching jobs into your pipeline...");
+      setTimeout(() => pollFetchQueue(userId), 4000);
+    } else if (status === "done") {
+      setToast(`Done — ${json.request.new_jobs_count ?? 0} new job(s) added and scored.`);
+      setBusy(null);
+      await loadAll();
+    } else if (status === "failed") {
+      setToast(`Fetch failed: ${json.request.error_msg ?? "unknown error"}`);
+      setBusy(null);
+      await loadAll();
+    } else {
+      setBusy(null);
+    }
+  }
+
   async function runIngest() {
     setBusy("ingest");
     setToast(null);
     const { data: { user } } = await supabase.auth.getUser();
-    const ingestRes = await fetch("/api/jobs/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
-    const ingestJson = await ingestRes.json().catch(() => ({}));
-    if (!ingestRes.ok) {
-      setToast(`Fetch failed: ${ingestJson.error ?? ingestRes.status}`);
-      setBusy(null);
-      return;
-    }
-    const scoreRes = await fetch("/api/jobs/score", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user!.id }) });
-    const scoreJson = await scoreRes.json().catch(() => ({}));
-    if (!scoreRes.ok) {
-      setToast(`Scoring failed: ${scoreJson.error ?? scoreRes.status}`);
-    } else if ((ingestJson.new_jobs ?? 0) === 0) {
-      setToast("No new jobs found this run (sources may have returned nothing new, or Apify actors aren't configured yet).");
-    } else {
-      setToast(`Found ${ingestJson.new_jobs} new job(s), scored ${scoreJson.scored ?? 0}.`);
-    }
-    await loadAll();
-    setBusy(null);
+    await pollFetchQueue(user!.id);
   }
 
   async function saveFilters() {

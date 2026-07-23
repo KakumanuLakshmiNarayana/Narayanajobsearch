@@ -21,12 +21,17 @@ publisher feed, if you want a lower-risk sourcing path).
 - Next.js 14 (App Router) + Tailwind
 - Supabase (Postgres + Auth + Storage), multi-tenant via Row Level Security
 - Anthropic Claude for resume parsing, title suggestions, match scoring, tailoring
-- Job discovery: synced from the existing `jobboard` Supabase project (a separately-run
-  daily pipeline pulling from Adzuna, Arbeitnow, USAJobs, Dice, LinkedIn, Indeed,
-  Glassdoor, etc. — 57k+ jobs and growing). We read its public `jobs` table
-  (`JOBBOARD_SUPABASE_URL` / `JOBBOARD_SUPABASE_ANON_KEY`) and copy matches into our
-  own `jobs` pool, rather than re-scraping ourselves. See `src/lib/jobboard.ts` and
-  `src/app/api/jobs/ingest/route.ts`.
+- Job discovery: "Fetch jobs now" drives the existing `jobboard` repo's own scraper
+  (LinkedIn/Indeed/Glassdoor/Dice via Apify) directly, via the same `repository_dispatch`
+  mechanism its `control_panel.html` uses — see `src/lib/jobboardControl.ts`. Since
+  jobboard's pipeline is single-tenant (one shared `config` row, one run at a time),
+  requests from different users go through a queue (`fetch_requests` table +
+  `src/app/api/jobs/fetch-now/route.ts`): only one jobboard run is in flight at a
+  time, others wait their turn with a visible queue position. Once a run finishes,
+  the newly-added jobs are synced into our own `jobs` pool for that user and scored.
+  `src/app/api/jobs/ingest/route.ts` remains as a simpler read-only alternative (just
+  syncs from whatever's already in jobboard's `jobs` table, no fresh scrape
+  triggered) if you ever want that instead.
 
 ## Data model (Supabase project: job-agent, id gkpwhyhjytjcutuyvwqf)
 - `profiles` — 1:1 with auth.users
@@ -51,6 +56,7 @@ only.
    - `SUPABASE_SERVICE_ROLE_KEY` — Supabase dashboard > Project Settings > API
    - `ANTHROPIC_API_KEY` — console.anthropic.com
    - `JOBBOARD_SUPABASE_URL` / `JOBBOARD_SUPABASE_ANON_KEY` — already filled in with the shared `jobboard` project's public read credentials, no action needed
+   - `JOBBOARD_GITHUB_TOKEN` — GitHub PAT (classic, `repo` + `workflow` scopes) authorized on the `jobboard` repo, used to trigger its scrape via `repository_dispatch`
    - `CRON_SECRET` — any random string, used to authorize `/api/cron/daily`
 2. `npm install`
 3. `npm run dev`
