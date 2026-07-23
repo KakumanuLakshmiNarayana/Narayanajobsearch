@@ -178,12 +178,23 @@ export default function DashboardClient({ userEmail, fullName }: { userEmail: st
 
         {tab === "resume" && (
           <div className="space-y-4 max-w-3xl">
-            {sections.map(s => (
-              <div key={s.id} className="bg-white p-4 rounded-xl shadow">
-                <div className="font-semibold text-slate-500 text-sm uppercase tracking-wide mb-2">{s.header}</div>
-                <div className="whitespace-pre-wrap text-sm">{s.subject}</div>
-              </div>
-            ))}
+            {sections.map(s => {
+              const meta = s.meta ?? {};
+              const metaLine = [meta.title, meta.company, meta.location].filter(Boolean).join(" · ");
+              const dateLine = [meta.start_date, meta.end_date].filter(Boolean).join(" – ");
+              return (
+                <div key={s.id} className="bg-white p-4 rounded-xl shadow">
+                  <div className="font-semibold text-slate-500 text-sm uppercase tracking-wide mb-2">{s.header}</div>
+                  {(metaLine || dateLine) && (
+                    <div className="text-sm text-slate-700 mb-1">
+                      {metaLine && <span className="font-medium">{metaLine}</span>}
+                      {dateLine && <span className="text-slate-400 ml-2">{dateLine}</span>}
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap text-sm">{s.subject}</div>
+                </div>
+              );
+            })}
             {sections.length === 0 && <p className="text-slate-400">No resume uploaded yet. Go through <a className="underline" href="/onboarding">onboarding</a>.</p>}
           </div>
         )}

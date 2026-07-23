@@ -4,6 +4,13 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const SOURCES = ["linkedin", "indeed", "glassdoor"];
+const META_FIELDS: { key: string; label: string }[] = [
+  { key: "title", label: "Title" },
+  { key: "company", label: "Company" },
+  { key: "location", label: "Location" },
+  { key: "start_date", label: "Start date" },
+  { key: "end_date", label: "End date" }
+];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -39,14 +46,22 @@ export default function OnboardingPage() {
     setStep(2);
   }
 
-  async function saveSectionEdit(id: string, subject: string) {
+  function hasMeta(s: any) {
+    return s.meta && Object.keys(s.meta).some(k => (s.meta[k] ?? "").toString().trim() !== "");
+  }
+
+  function updateSubject(id: string, subject: string) {
     setSections(sections.map(s => s.id === id ? { ...s, subject } : s));
+  }
+
+  function updateMeta(id: string, key: string, value: string) {
+    setSections(sections.map(s => s.id === id ? { ...s, meta: { ...s.meta, [key]: value } } : s));
   }
 
   async function persistSections() {
     setLoading(true);
     for (const s of sections) {
-      if (s.id) await supabase.from("resume_sections").update({ subject: s.subject }).eq("id", s.id);
+      if (s.id) await supabase.from("resume_sections").update({ subject: s.subject, meta: s.meta ?? {} }).eq("id", s.id);
     }
     setLoading(false);
     setStep(3);
@@ -103,11 +118,27 @@ export default function OnboardingPage() {
           {sections.map(s => (
             <div key={s.id} className="bg-white p-4 rounded-xl shadow">
               <div className="font-semibold text-slate-500 text-sm uppercase tracking-wide mb-2">{s.header}</div>
+
+              {hasMeta(s) && (
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {META_FIELDS.map(f => (
+                    <div key={f.key}>
+                      <label className="text-xs text-slate-400">{f.label}</label>
+                      <input
+                        className="w-full border rounded-lg px-2 py-1 text-sm"
+                        value={s.meta?.[f.key] ?? ""}
+                        onChange={e => updateMeta(s.id, f.key, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <textarea
                 className="w-full border rounded-lg p-2 text-sm"
                 rows={4}
                 value={s.subject}
-                onChange={e => saveSectionEdit(s.id, e.target.value)}
+                onChange={e => updateSubject(s.id, e.target.value)}
               />
             </div>
           ))}
